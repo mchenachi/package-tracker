@@ -1,42 +1,93 @@
-//import jwt from "express-jwt";
-//import jwksRsa from "jwks-rsa";
 import * as dotenv from "dotenv";
-import { nextTick } from "process";
+import {
+  DecodeResult,
+  ExpirationStatus,
+  Session,
+} from "../login/login.interface";
 
+import { Request, Response, NextFunction } from "express";
+import {
+  checkExpirationStatus,
+  decodeSession,
+  encodeSession,
+} from "../common/jwt-token";
 
 dotenv.config();
 
-const jwt = require("jsonwebtoken");
+/**
+ * Express middleware, checks for a valid JSON Web Token and returns 401 Unauthorized if one isn't found.
+ */
+export function requireJwtMiddleware(
+  request: Request,
+  response: Response,
+  next: NextFunction
+) {
+  console.log("test");
+  const unauthorized = (message: string) =>
+    response.status(401).json({
+      ok: false,
+      status: 401,
+      message: message,
+    });
 
-// export const checkJwt = jwt({
-//   secret: jwksRsa.expressJwtSecret({
-//     cache: true,
-//     rateLimit: true,
-//     jwksRequestsPerMinute: 5,
-//     jwksUri: `https://${process.env.AUTH0_DOMAIN}/.well-known/jwks.json`
-//   }),
+  const requestHeader = "X-JWT-Token";
+  const responseHeader = "X-Renewed-JWT-Token";
+  const header = request.header(requestHeader);
 
-//   // Validate the audience and the issuer.
-//   audience: process.env.AUTH0_AUDIENCE,
-//   issuer: `https://${process.env.AUTH0_DOMAIN}/`,
-//   algorithms: ["RS256"]
-// });
+  if (!header) {
+    unauthorized(`Required ${requestHeader} header not found.`);
+    return;
+  }
 
-export const verifyJwt = (token: string, id: number) => {
-	const userToken = token;
-	const userId = id;
+  var secret = process.env.SECRET ? process.env.SECRET : "";
+  const decodedSession: DecodeResult = decodeSession(secret, header);
 
-	if (!token) {
-		//return 401
-	}
+  if (
+    decodedSession.type === "integrity-error" ||
+    decodedSession.type === "invalid-token"
+  ) {
+    unauthorized(
+      `Failed to decode or validate authorization token. Reason: ${decodedSession.type}.`
+    );
+    return;
+  }
 
-	jwt.verify(token, process.env.SECRET, function (err: any, decoded: any) {
-		if (err) {
-			// return 500
-		}
+  const expiration: ExpirationStatus = checkExpirationStatus(
+    decodedSession.session
+  );
 
-		id = decoded.id;
-		//next();
-	})
+  if (expiration === "expired") {
+    unauthorized(
+      `Authorization token has expired. Please create a new authorization token.`
+    );
+    return;
+  }
 
+  let session: Session;
+
+  if (expiration === "grace") {
+    // Automatically renew the session and send it back with the response
+    const { token, expires, issued } = encodeSession(
+      secret,
+      decodedSession.session
+    );
+    session = {
+      ...decodedSession.session,
+      expires: expires,
+      issued: issued,
+    };
+
+    response.setHeader(responseHeader, token);
+  } else {
+    session = decodedSession.session;
+  }
+
+  // Set the session on response.locals object for routes to access
+  response.locals = {
+    ...response.locals,
+    session: session,
+  };
+
+  // Request has a valid or renewed session. Call next to continue to the authenticated route handler
+  next();
 }
