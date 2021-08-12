@@ -1,26 +1,26 @@
 /**
  * Data Model Interfaces
  */
-import { Base, Response } from './correios-tracking.interface';
+import axios from "axios";
+import { CorreiosResponse } from "./correios-tracking.interface";
+import * as dotenv from "dotenv";
+
+dotenv.config();
 
 /**
  * In-Memory Store
  */
 
-let trackingCode: Base = {
-	code: "test"
-}
-
-let response: Response = {
-	code: trackingCode.code,
-	id: 1
-}
-
-
 /**
  * Service Methods
  */
 
-export const find = async (code: string): Promise<Response> => {
-	return response
+export const find = async (code: string): Promise<CorreiosResponse[]> => {
+  var url: string = `https://api.linketrack.com/track/json?user=${process.env.LINKE_TRACK_USER}&token=${process.env.LINKE_TRACK_TOKEN}&codigo=${code}`;
+
+  var res = await axios.get<CorreiosResponse[]>(url).then((res) => {
+    return res.data;
+  });
+
+  return res;
 };
